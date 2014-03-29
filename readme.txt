@@ -19,7 +19,7 @@ This plugin automatically adds new Wordpress users to your Campaign Monitor list
 
 = Relation to our Campaign Monitor Synchronization plugin =
 
-Our plugin [Campaign Monitor Synchronization] (http://wordpress.org/plugins/campaign-monitor-synchronization) also adds WordPress users to Campaign Monitor, but it uses a more strict synchronization mechanism. For instance, it also removes users from the Campaign Monitor list when they do not exist as Wordpress users. For a lot of use cases this behavior is too rigorous, therefore we created this new plugin.
+Our plugin [Campaign Monitor Synchronization](http://wordpress.org/plugins/campaign-monitor-synchronization) also adds WordPress users to Campaign Monitor, but it uses a more strict synchronization mechanism. For instance, it also removes users from the Campaign Monitor list when they do not exist as Wordpress users. For a lot of use cases this behavior is too rigorous, therefore we created this new plugin.
 
 = Links =
 
