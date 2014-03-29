@@ -29,7 +29,7 @@ Our plugin [Campaign Monitor Synchronization] (http://wordpress.org/plugins/camp
 
 == Installation ==
 
-1. Register on http://campaignmonitor.com and create a list. Don't use an existing list, the data will be lost !
+1. Register on http://campaignmonitor.com and create a list, if you haven't done this already.
 1. In the list details click the link "change name/type", there you will find the list ID, it is a 32 character hexadecimal string. Don't use the list ID in the url!.
 1. Go to your account settings. There you will find the API key, it is also a 32 character hexadecimal string.
 1. On your wordpress website, upload `campaign-monitor-dual-registration.zip` to the `/wp-content/plugins/` directory
