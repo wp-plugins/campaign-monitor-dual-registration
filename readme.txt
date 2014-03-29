@@ -12,11 +12,15 @@ Subscribe new Wordpress user to your mailing list on Campaign Monitor.
 
 == Description ==
 
-This plugin automatically adds new Wordpress users to Campaign Monitor. Modifications on the Campaign Monitor list can be copied back to the Wordpress list, this is not yet documented. 
+This plugin provides automatically adds new Wordpress users to your Campaign Monitor list. 
+
+* The moment a user is added to WordPress, its email address (and optionally) user-meta data will be copied to Campaign Monitor.
+* Also, when user data is changed, the modifications will be sent to Campaign Monitor
+* Changes on Campaign Monitor can be reflected back to the user list, to use this feature one needs to define webhooks on the Campaign Monitor website. 
 
 = Relation to our Campaign Monitor Synchronization plugin =
 
-This plugin is written as an alternative for our plugin "Campaign Monitor Synchronization". It keeps both lists in full sync, where the WordPress user list is the master. For a lot of use cases this behavior is too rigorous, therefore we created this new plugin.
+Our plugin [Campaign Monitor Synchronization] (http://wordpress.org/plugins/campaign-monitor-synchronization) also adds WordPress users to Campaign Monitor, but it uses a more strict synchronization mechanism. For instance, it also removes users from the Campaign Monitor list when they do not exist as Wordpress users. For a lot of use cases this behavior is too rigorous, therefore we created this new plugin.
 
 = Links =
 
