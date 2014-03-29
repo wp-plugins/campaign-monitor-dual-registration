@@ -12,7 +12,7 @@ Subscribe new Wordpress user to your mailing list on Campaign Monitor.
 
 == Description ==
 
-This plugin provides automatically adds new Wordpress users to your Campaign Monitor list. 
+This plugin automatically adds new Wordpress users to your Campaign Monitor list. 
 
 * The moment a user is added to WordPress, its email address (and optionally) user-meta data will be copied to Campaign Monitor.
 * Also, when user data is changed, the modifications will be sent to Campaign Monitor
