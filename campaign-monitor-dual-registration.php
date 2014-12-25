@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: Campaign Monitor Dual Registration
-Version: 1.0.5
+Version: 1.0.6
 Author: Carlo Roosen, Elena Mukhina
 Author URI: http://www.carloroosen.com/
 */
@@ -239,7 +239,8 @@ function cmdr_api_init() {
 		'wp_dashboard_quick_press_last_post_id',
 		'wp_user-settings',
 		'wp_user-settings-time',
-		'wp_user_level'
+		'wp_user_level',
+		'session_tokens'
 	);
 	$cmdr_fields_to_hide = apply_filters( 'cmdr_edit_fileds_to_hide', $cmdr_fields_to_hide );
 }
