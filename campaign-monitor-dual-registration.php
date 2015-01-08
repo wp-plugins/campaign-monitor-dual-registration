@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: Campaign Monitor Dual Registration
-Version: 1.0.6
+Version: 1.0.7
 Author: Carlo Roosen, Elena Mukhina
 Author URI: http://www.carloroosen.com/
 */
@@ -12,11 +12,14 @@ define( 'CMDR_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 // Global variables
 global $cmdr_fields_to_hide;
 
+register_deactivation_hook( __FILE__, 'cmdr_default_settings' );
 register_deactivation_hook( __FILE__, 'cmdr_webhook_remove' );
 
-add_action( 'admin_menu', 'cmdr_plugin_menu' );
-add_action( 'init', 'cmdr_api_init' );
+add_action( 'admin_init', 'cmdr_settings' );
+add_action( 'admin_menu', 'cmdr_settings_menu' );
+add_action( 'init', 'cmdr_init' );
 add_action( 'profile_update', 'cmdr_user_update', 10, 2 );
+add_action( 'update_option_cmdr_settings', 'cmdr_save_and_sync' );
 add_action( 'user_register', 'cmdr_user_insert' );
 add_action( 'wp_ajax_cmdr-cm-sync', 'cmdr_cm_sync' );
 add_action( 'wp_ajax_nopriv_cmdr-cm-sync', 'cmdr_cm_sync' );
@@ -25,128 +28,56 @@ add_filter( 'update_user_metadata', 'cmdr_user_meta_update', 1000, 5 );
 
 require_once CMDR_PLUGIN_PATH . 'classes/CMDR_Dual_Synchronizer.php';
 
-// Remove the webhook if needed
-function cmdr_webhook_remove() {
-	if ( ! class_exists( 'CS_REST_Lists' ) ) {
-		require_once CMDR_PLUGIN_PATH . 'campaignmonitor-createsend-php/csrest_lists.php';
-	}
-
-	$auth = array( 'api_key' => get_option( 'cmdr_api_key' ) );
-	$wrap_l = new CS_REST_Lists( get_option( 'cmdr_list_id' ), $auth );
-
-	$c = false;
-	$result = $wrap_l->get_webhooks();
-	foreach( $result->response as $hook ) {
-		if ( $hook->Url == admin_url( 'admin-ajax.php?action=cmdr-cm-sync' ) ) {
-			$c = $hook->WebhookID;
-			break;
-		}
-	}
-
-	if ( $c ) {
-		$result = $wrap_l->delete_webhook( $c );
-	}
-}
-
-function cmdr_plugin_menu() {
-	if ( basename( $_SERVER['SCRIPT_FILENAME'] ) == 'plugins.php' && isset( $_GET['page'] ) && $_GET['page'] == 'cm-dual-registration' ) {
-		// Check permissions
-		if ( !current_user_can( 'manage_options' ) )  {
-			wp_die( __( 'You do not have sufficient permissions to access this page.', 'cm-dual-registration' ) );
-		}
+function cmdr_default_settings() {
+	if ( ! get_option( 'cmdr_settings' ) ) {
+		remove_action( 'update_option_cmdr_settings', 'cmdr_save_and_sync' );
 		
-		if ( $_SERVER[ 'REQUEST_METHOD' ] == 'POST' ) {
-			if ( isset( $_POST[ 'cmdr_user_fields' ] ) ) {
-				update_option( 'cmdr_user_fields', base64_encode( serialize( ( array ) $_POST[ 'cmdr_user_fields' ] ) ) );
-			} else {
-				update_option( 'cmdr_user_fields', base64_encode( serialize( array() ) ) );
-			}
-			update_option( 'cmdr_api_key', $_POST[ 'cmdr_api_key' ] );
-			update_option( 'cmdr_list_id', $_POST[ 'cmdr_list_id' ] );
-			
-			if ( ! class_exists( 'CS_REST_Lists' ) ) {
-				require_once CMDR_PLUGIN_PATH . 'campaignmonitor-createsend-php/csrest_lists.php';
-			}
-
-			$auth = array( 'api_key' => get_option( 'cmdr_api_key' ) );
-			$wrap_l = new CS_REST_Lists( get_option( 'cmdr_list_id' ), $auth );
-
-			if ( $_POST[ 'cmdr_cm_sync' ] ) {
-				update_option( 'cmdr_cm_sync', 1 );
-				
-				// Create the webhook if needed
-				$c = true;
-				$result = $wrap_l->get_webhooks();
-				if ( ! $result->was_successful() ) {
-					wp_redirect( home_url( '/wp-admin/plugins.php?page=cm-dual-registration&error=' . urlencode( $result->response->Message ) ) );
-					die();
-				}
-				foreach( $result->response as $hook ) {
-					if ( $hook->Url == admin_url( 'admin-ajax.php?action=cmdr-cm-sync' ) ) {
-						$c = false;
-						break;
-					}
-				}
-
-				if ( $c ) {
-					$result = $wrap_l->create_webhook( array(
-						'Events' => array( CS_REST_LIST_WEBHOOK_SUBSCRIBE, CS_REST_LIST_WEBHOOK_UPDATE ),
-						'Url' => admin_url( 'admin-ajax.php?action=cmdr-cm-sync' ),
-						'PayloadFormat' => CS_REST_WEBHOOK_FORMAT_JSON
-					) );
-					if ( ! $result->was_successful() ) {
-						wp_redirect( home_url( '/wp-admin/plugins.php?page=cm-dual-registration&error=' . urlencode( $result->response->Message ) ) );
-						die();
-					}
-				}
-			} else {
-				delete_option( 'cmdr_cm_sync' );
-				
-				// Remove the webhook if needed
-				$c = false;
-				$result = $wrap_l->get_webhooks();
-				if ( ! $result->was_successful() ) {
-					wp_redirect( home_url( '/wp-admin/plugins.php?page=cm-dual-registration&error=' . urlencode( $result->response->Message ) ) );
-					die();
-				}
-				foreach( $result->response as $hook ) {
-					if ( $hook->Url == admin_url( 'admin-ajax.php?action=cmdr-cm-sync' ) ) {
-						$c = $hook->WebhookID;
-						break;
-					}
-				}
-
-				if ( $c ) {
-					$result = $wrap_l->delete_webhook( $c );
-					if ( ! $result->was_successful() ) {
-						wp_redirect( home_url( '/wp-admin/plugins.php?page=cm-dual-registration&error=' . urlencode( $result->response->Message ) ) );
-						die();
-					}
-				}
-			}
-			// Make forced sync
-			$result = CMDR_Dual_Synchronizer::cmdr_mass_update();
-
-			if ( $result ) {
-				wp_redirect( home_url( '/wp-admin/plugins.php?page=cm-dual-registration&saved=true' ) );
-			} else {
-				wp_redirect( home_url( '/wp-admin/plugins.php?page=cm-dual-registration&error=' . urlencode( CMDR_Dual_Synchronizer::$error->Message . ( ! empty( CMDR_Dual_Synchronizer::$error->ResultData ) ? '<br />Error details: ' . json_encode( CMDR_Dual_Synchronizer::$error->ResultData ) : '' ) ) ) );
-			}
-		}
+		$cmdr_settings = array(
+			'sync_timestamp' => 0,
+			'user_fields' => array(),
+			'api_key' => '',
+			'list_id' => '',
+			'cm_sync' => 0
+		);
+		update_option( 'cmdr_settings', $cmdr_settings );
 	}
-	
-	add_plugins_page( 'Campaign Monitor Dual Registration Options', 'CM Dual Registration', 'manage_options', 'cm-dual-registration', 'cmdr_plugin_page' );
 }
 
-function cmdr_plugin_page() {
+function cmdr_webhook_remove() {
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	$cmdr_settings[ 'cm_sync' ] = 0;
+	update_option( 'cmdr_settings', $cmdr_settings );
+}
+
+function cmdr_settings() {
+	register_setting( 'cmdr_settings_group', 'cmdr_settings', 'cmdr_settings_sanitize' );
+
+	add_settings_section( 'general', __( 'General', 'cmdr_plugin' ), 'cmdr_settings_general', 'cmdr_plugin' );
+	add_settings_field( 'user_fields', __( 'User fields', 'cmdr_plugin' ), 'cmdr_settings_user_fields', 'cmdr_plugin', 'general' );
+
+	add_settings_section( 'api', __( 'API', 'cmdr_plugin' ), 'cmdr_settings_api', 'cmdr_plugin' );
+	add_settings_field( 'api_key', __( 'API key', 'cmdr_plugin' ), 'cmdr_settings_api_key', 'cmdr_plugin', 'api' );
+	add_settings_field( 'list_id', __( 'List ID', 'cmdr_plugin' ), 'cmdr_settings_list_id', 'cmdr_plugin', 'api' );
+
+	add_settings_section( 'cm', __( 'CM', 'cmdr_plugin' ), 'cmdr_settings_cm', 'cmdr_plugin' );
+	add_settings_field( 'cm_sync', __( 'Keep in sync', 'cmdr_plugin' ), 'cmdr_settings_cm_sync', 'cmdr_plugin', 'cm' );
+}
+
+function cmdr_settings_sanitize( $cmdr_settings ) {
+	$cmdr_settings[ 'sync_timestamp' ] = current_time( 'timestamp' );
+	return $cmdr_settings;
+}
+
+function cmdr_settings_general() {
+}
+
+function cmdr_settings_user_fields() {
 	global $wpdb;
 	global $cmdr_fields_to_hide;
-	
-	// Check permissions
-	if ( !current_user_can( 'manage_options' ) )  {
-		wp_die( __( 'You do not have sufficient permissions to access this page.', 'cm-dual-registration' ) );
-	}
 
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	$cmdr_user_fields = ( array ) $cmdr_settings[ 'user_fields' ];
+	
 	// Get user meta keys
 	$querystr = "
 		SELECT DISTINCT umeta.meta_key
@@ -156,71 +87,54 @@ function cmdr_plugin_page() {
 	";
 	$items = $wpdb->get_results( $querystr, OBJECT );
 	
-	$cmdr_user_fields = ( array ) unserialize( base64_decode( get_option( 'cmdr_user_fields' ) ) );
-	
-	if ( isset( $_REQUEST['saved'] ) )
-		echo '<div id="message" class="updated fade"><p><strong> ' . __( 'Settings saved.', 'cm-dual-registration' ) . '</strong></p></div>';
-	if ( isset( $_REQUEST['error'] ) )
-		echo '<div id="message" class="updated fade"><p><strong> ' . __( 'Campaign Monitor synchronization error.', 'cm-dual-registration' ) . '<br />' . __( urldecode( $_REQUEST['error'] ), 'cm-dual-registration' ) . '</strong></p></div>';
+	foreach( $items as $item ) {
+		if ( in_array( $item->meta_key, $cmdr_fields_to_hide ) ) {
+			continue;
+		}
+		echo '<label><input type="checkbox" name="cmdr_settings[user_fields][]" value="' . esc_attr( $item->meta_key ) . '" ' . checked( in_array( $item->meta_key, $cmdr_user_fields ), true, false ) . ' /> ' . $item->meta_key . '</label><br />';
+	}
+}
+
+function cmdr_settings_api() {
+}
+
+function cmdr_settings_api_key() {
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	echo '<input type="text" name="cmdr_settings[api_key]" value="' . esc_attr( $cmdr_settings[ 'api_key'] ) . '" size="70" />';
+}
+
+function cmdr_settings_list_id() {
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	echo '<input type="text" name="cmdr_settings[list_id]" value="' . esc_attr( $cmdr_settings[ 'list_id'] ) . '" size="70" />';
+}
+
+function cmdr_settings_cm() {
+}
+
+function cmdr_settings_cm_sync() {
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	echo '<input type="hidden" name="cmdr_settings[cm_sync]" value="0" />';
+	echo '<input type="checkbox" name="cmdr_settings[cm_sync]" value="1" ' . checked( $cmdr_settings[ 'cm_sync'], 1, false ) . ' />';
+}
+
+function cmdr_settings_menu() {
+	add_options_page( __( 'Campaign Monitor Dual Registration Options', 'cmdr_plugin' ), __( 'CM Dual Registration', 'cmdr_plugin' ), 'manage_options', 'cmdr_plugin', 'cmdr_settings_page' );
+}
+
+function cmdr_settings_page() {
 	?>
 	<div class="wrap">
-		<div id="icon-themes" class="icon32">
-			<br>
-		</div>
-		<form method="post">
-			<h2><?php _e( 'Campaign Monitor Dual Registration Options', 'cm-dual-registration' ); ?></h2>
-			<div class="inside">
-				<table border="0">
-					<tbody>
-						<tr>
-							<td colspan="2"><h3><?php _e( 'General', 'cm-dual-registration' );?></h3></td>
-						</tr>
-						<tr>
-							<td style="vertical-align: top;"><?php _e( 'User fields', 'cm-dual-registration' ); ?>:</td>
-							<td>
-								<?php
-								foreach( $items as $item ) {
-									if ( in_array( $item->meta_key, $cmdr_fields_to_hide ) ) {
-										continue;
-									}
-									?>
-								<label><input type="checkbox" name="cmdr_user_fields[]" value="<?php echo esc_attr( $item->meta_key ); ?>"<?php echo ( in_array( $item->meta_key, $cmdr_user_fields ) ? ' checked="true"' : '' ); ?> /> <?php echo $item->meta_key; ?></label><br />
-									<?php
-								}
-								?>
-							</td>
-						</tr>
-						<tr>
-							<td colspan="2"><h3><?php _e( 'API', 'cm-dual-registration' );?></h3></td>
-						</tr>
-						<tr>
-							<td style="vertical-align: top;"><label for="cmdr_api_key"><?php _e( 'API key', 'cm-dual-registration' ); ?>:</label></td>
-							<td><input type="text" name="cmdr_api_key" id="cmdr_api_key" value="<?php echo esc_attr( get_option( 'cmdr_api_key' ) ); ?>" size="70" /></td>
-						</tr>
-						<tr>
-							<td style="vertical-align: top;"><label for="cmdr_list_id"><?php _e( 'List ID', 'cm-dual-registration' ); ?>:</label></td>
-							<td><input type="text" name="cmdr_list_id" id="cmdr_list_id" value="<?php echo esc_attr( get_option( 'cmdr_list_id' ) ); ?>" size="70" /></td>
-						</tr>
-						<tr>
-							<td colspan="2"><h3><?php _e( 'CM', 'cm-dual-registration' );?></h3></td>
-						</tr>
-						<tr>
-							<td colspan="2"><input type="hidden" name="cmdr_cm_sync" value="0" /><input type="checkbox" name="cmdr_cm_sync" id="cmdr_cm_sync" value="1"<?php echo ( get_option( 'cmdr_cm_sync' ) ? ' checked="checked"' : '' ); ?> /> <label for="cmdr_cm_sync"><?php _e( 'Keep in sync', 'cm-dual-registration' ); ?></label></td>
-						</tr>
-						<tr>
-						<tr>
-							<td></td>
-							<td><input type="submit" value="save and sync" /></td>
-						</tr>
-					</tbody>
-				</table>
-			</div>
+		<h2><?php _e( 'Campaign Monitor Dual Registration Options', 'cmdr_plugin' ); ?></h2>
+		<form action="options.php" method="POST">
+			<?php settings_fields( 'cmdr_settings_group' ); ?>
+			<?php do_settings_sections( 'cmdr_plugin' ); ?>
+			<?php submit_button( __( 'save and sync', 'cmdr_plugin' ) ); ?>
 		</form>
 	</div>
 	<?php
 }
 
-function cmdr_api_init() {
+function cmdr_init() {
 	global $cmdr_fields_to_hide;
 	
 	$cmdr_fields_to_hide = array(
@@ -243,10 +157,29 @@ function cmdr_api_init() {
 		'session_tokens'
 	);
 	$cmdr_fields_to_hide = apply_filters( 'cmdr_edit_fileds_to_hide', $cmdr_fields_to_hide );
-}
-
-function cmdr_load_translation_file() {
-	load_plugin_textdomain( 'cm-dual-registration', '', CMDR_PLUGIN_PATH . 'translations' );
+	
+	// Backward compatibility
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	if ( get_option( 'cmdr_user_fields' ) ) {
+		$cmdr_settings[ 'user_fields' ] = ( array ) unserialize( base64_decode( get_option( 'cmdr_user_fields' ) ) );
+		update_option( 'cmdr_settings', $cmdr_settings );
+		delete_option( 'cmdr_user_fields' );
+	}
+	if ( get_option( 'cmdr_api_key' ) ) {
+		$cmdr_settings[ 'api_key' ] = get_option( 'cmdr_api_key' );
+		update_option( 'cmdr_settings', $cmdr_settings );
+		delete_option( 'cmdr_api_key' );
+	}
+	if ( get_option( 'cmdr_list_id' ) ) {
+		$cmdr_settings[ 'list_id' ] = get_option( 'cmdr_list_id' );
+		update_option( 'cmdr_settings', $cmdr_settings );
+		delete_option( 'cmdr_list_id' );
+	}
+	if ( get_option( 'cmdr_cm_sync' ) ) {
+		$cmdr_settings[ 'cm_sync' ] = get_option( 'cmdr_cm_sync' );
+		update_option( 'cmdr_settings', $cmdr_settings );
+		delete_option( 'cmdr_cm_sync' );
+	}
 }
 
 function cmdr_user_update( $user_id, $old_user_data ) {
@@ -269,6 +202,77 @@ function cmdr_user_update( $user_id, $old_user_data ) {
 	}
 }
 
+function cmdr_save_and_sync( $cmdr_settings_old ) {
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	$cmdr_settings_old = ( array ) $cmdr_settings_old;
+
+	// Handle the webhook if needed
+	if ( $cmdr_settings[ 'cm_sync' ] != $cmdr_settings_old[ 'cm_sync' ] ) {
+		if ( ! class_exists( 'CS_REST_Lists' ) ) {
+			require_once CMDR_PLUGIN_PATH . 'campaignmonitor-createsend-php/csrest_lists.php';
+		}
+
+		$cmdr_api_key = $cmdr_settings[ 'api_key' ];
+		$cmdr_list_id = $cmdr_settings[ 'list_id' ];
+		$auth = array( 'api_key' => $cmdr_api_key );
+		$wrap_l = new CS_REST_Lists( $cmdr_list_id, $auth );
+
+		if ( $cmdr_settings[ 'cm_sync' ] ) {
+			// Create the webhook
+			$c = true;
+			$result = $wrap_l->get_webhooks();
+			if ( ! $result->was_successful() ) {
+				add_settings_error( 'cmdr_settings', 'cm-error', __( $result->response->Message, 'cmdr_plugin' ) );
+			}
+			foreach( $result->response as $hook ) {
+				if ( $hook->Url == admin_url( 'admin-ajax.php?action=cmdr-cm-sync' ) ) {
+					$c = false;
+					break;
+				}
+			}
+
+			if ( $c ) {
+				$result = $wrap_l->create_webhook( array(
+					'Events' => array( CS_REST_LIST_WEBHOOK_SUBSCRIBE, CS_REST_LIST_WEBHOOK_UPDATE ),
+					'Url' => admin_url( 'admin-ajax.php?action=cmdr-cm-sync' ),
+					'PayloadFormat' => CS_REST_WEBHOOK_FORMAT_JSON
+				) );
+				if ( ! $result->was_successful() ) {
+					add_settings_error( 'cmdr_settings', 'cm-error', __( $result->response->Message, 'cmdr_plugin' ) );
+				}
+			}
+		} else {
+			// Remove the webhook
+			$c = false;
+			$result = $wrap_l->get_webhooks();
+			if ( ! $result->was_successful() ) {
+				add_settings_error( 'cmdr_settings', 'cm-error', __( $result->response->Message, 'cmdr_plugin' ) );
+			}
+			foreach( $result->response as $hook ) {
+				if ( $hook->Url == admin_url( 'admin-ajax.php?action=cmdr-cm-sync' ) ) {
+					$c = $hook->WebhookID;
+					break;
+				}
+			}
+
+			if ( $c ) {
+				$result = $wrap_l->delete_webhook( $c );
+				if ( ! $result->was_successful() ) {
+					add_settings_error( 'cmdr_settings', 'cm-error', __( $result->response->Message, 'cmdr_plugin' ) );
+				}
+			}
+		}
+	}
+	
+	// Make forced sync if needed
+	if ( $cmdr_settings[ 'sync_timestamp' ] > $cmdr_settings_old[ 'sync_timestamp' ] ) {
+		$result = CMDR_Dual_Synchronizer::cmdr_mass_update();
+		if ( ! $result ) {
+			add_settings_error( 'cmdr_settings', 'cm-error', __( CMDR_Dual_Synchronizer::$error->Message, 'cmdr_plugin' ) . ( ! empty( CMDR_Dual_Synchronizer::$error->ResultData ) ? '<br />' . __( 'Error details: ', 'cmdr_plugin' ) . json_encode( CMDR_Dual_Synchronizer::$error->ResultData ) : '' ) );
+		}
+	}
+}
+
 function cmdr_user_insert( $user_id ) {
 	// Make new user sync
 	CMDR_Dual_Synchronizer::cmdr_user_update( $user_id, null, null, true );
@@ -276,6 +280,11 @@ function cmdr_user_insert( $user_id ) {
 
 function cmdr_cm_sync() {
 	global $cmdr_fields_to_hide;
+
+	// Get plugin settings
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	$cmdr_list_id = $cmdr_settings[ 'list_id' ];
+	$cmdr_user_fields = ( array ) $cmdr_settings[ 'user_fields' ];
 
 	if ( ! class_exists( 'CS_REST_SERIALISATION_get_available' ) ) {
 		require_once CMDR_PLUGIN_PATH . 'campaignmonitor-createsend-php/class/serialisation.php';
@@ -295,9 +304,7 @@ function cmdr_cm_sync() {
 
 	// List ID check
 	$list_id = $deserialised_data->ListID;
-	if ( trim( $list_id ) == trim( get_option( 'cmdr_list_id' ) ) ) {
-		$cmdr_user_fields = ( array ) unserialize( base64_decode( get_option( 'cmdr_user_fields' ) ) );
-	
+	if ( trim( $list_id ) == trim( $cmdr_list_id ) ) {
 		remove_action( 'profile_update', 'cmdr_user_update', 10 );
 		remove_action( 'user_register', 'cmdr_user_insert' );
 		remove_filter( 'update_user_metadata', 'cmdr_user_meta_update', 1000 );
@@ -340,7 +347,8 @@ function cmdr_cm_sync() {
 function cmdr_user_meta_update( $temp, $user_id, $meta_key, $meta_value ) {
 	global $cmdr_fields_to_hide;
 	
-	$cmdr_user_fields = ( array ) unserialize( base64_decode( get_option( 'cmdr_user_fields' ) ) );
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	$cmdr_user_fields = ( array ) $cmdr_settings[ 'user_fields' ];
 	
 	// The same value, no needs to update
 	if ( $meta_value == get_user_meta( $user_id, $meta_key, true ) )

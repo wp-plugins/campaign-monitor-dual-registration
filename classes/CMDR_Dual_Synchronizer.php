@@ -6,49 +6,54 @@ class CMDR_Dual_Synchronizer {
 	public static function cmdr_user_update( $user_id, $args = null, $user_email = null, $new_user = false ) {
 		global $cmdr_fields_to_hide;
 		
-		$cmdr_user_fields = ( array ) unserialize( base64_decode( get_option( 'cmdr_user_fields' ) ) );
+		$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+		$cmdr_api_key = $cmdr_settings[ 'api_key' ];
+		$cmdr_list_id = $cmdr_settings[ 'list_id' ];
+		$cmdr_user_fields = ( array ) $cmdr_settings[ 'user_fields' ];
 		
-		if ( ! class_exists( 'CS_REST_Subscribers' ) ) {
-			require_once CMDR_PLUGIN_PATH . 'campaignmonitor-createsend-php/csrest_subscribers.php';
-		}
-		
-		$auth = array( 'api_key' => get_option( 'cmdr_api_key' ) );
-		$wrap_s = new CS_REST_Subscribers( get_option( 'cmdr_list_id' ), $auth );
-
-		$user = get_userdata( $user_id );
-		if ( ! $user ) {
-			return false;
-		}
-		
-		if ( ! is_array( $args ) ) {
-			$args = array();
+		if ( $cmdr_api_key && $cmdr_list_id ) {
+			if ( ! class_exists( 'CS_REST_Subscribers' ) ) {
+				require_once CMDR_PLUGIN_PATH . 'campaignmonitor-createsend-php/csrest_subscribers.php';
+			}
 			
-			$args[ 'EmailAddress' ] = $user->user_email;
-			$args[ 'Name' ] = $user->first_name . ' ' . $user->last_name;
-			foreach( $cmdr_user_fields as $key => $field ) {
-				if ( ! in_array( $field, $cmdr_fields_to_hide ) ) {
-					if ( is_scalar( get_user_meta( $user->ID, $field, true ) ) ) {
-						$args[ 'CustomFields' ][] = array( 'Key' => $field, 'Value' => get_user_meta( $user->ID, $field, true ) );
-					} else {
-						$args[ 'CustomFields' ][] = array( 'Key' => $field, 'Value' => '' );
+			$auth = array( 'api_key' => $cmdr_api_key );
+			$wrap_s = new CS_REST_Subscribers( $cmdr_list_id, $auth );
+
+			$user = get_userdata( $user_id );
+			if ( ! $user ) {
+				return false;
+			}
+			
+			if ( ! is_array( $args ) ) {
+				$args = array();
+				
+				$args[ 'EmailAddress' ] = $user->user_email;
+				$args[ 'Name' ] = $user->first_name . ' ' . $user->last_name;
+				foreach( $cmdr_user_fields as $key => $field ) {
+					if ( ! in_array( $field, $cmdr_fields_to_hide ) ) {
+						if ( is_scalar( get_user_meta( $user->ID, $field, true ) ) ) {
+							$args[ 'CustomFields' ][] = array( 'Key' => $field, 'Value' => get_user_meta( $user->ID, $field, true ) );
+						} else {
+							$args[ 'CustomFields' ][] = array( 'Key' => $field, 'Value' => '' );
+						}
 					}
 				}
 			}
-		}
-		
-		if ( empty( $user_email ) ) {
-			$user_email = $user->user_email;
-		}
-		
-		if ( count( $args ) ) {
-			if ( $new_user ) {
-				$result = $wrap_s->add( $args );
-			} else {
-				$result = $wrap_s->update( $user_email, $args );
+			
+			if ( empty( $user_email ) ) {
+				$user_email = $user->user_email;
 			}
-			if ( ! $result->was_successful() ) {
-				self::$error = $result->response;
-				return false;
+			
+			if ( count( $args ) ) {
+				if ( $new_user ) {
+					$result = $wrap_s->add( $args );
+				} else {
+					$result = $wrap_s->update( $user_email, $args );
+				}
+				if ( ! $result->was_successful() ) {
+					self::$error = $result->response;
+					return false;
+				}
 			}
 		}
 		
@@ -59,7 +64,10 @@ class CMDR_Dual_Synchronizer {
 	public static function cmdr_mass_update() {
 		global $cmdr_fields_to_hide;
 		
-		$cmdr_user_fields = ( array ) unserialize( base64_decode( get_option( 'cmdr_user_fields' ) ) );
+		$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+		$cmdr_api_key = $cmdr_settings[ 'api_key' ];
+		$cmdr_list_id = $cmdr_settings[ 'list_id' ];
+		$cmdr_user_fields = ( array ) $cmdr_settings[ 'user_fields' ];
 		
 		if ( ! class_exists( 'CS_REST_Lists' ) ) {
 			require_once CMDR_PLUGIN_PATH . 'campaignmonitor-createsend-php/csrest_lists.php';
@@ -68,9 +76,9 @@ class CMDR_Dual_Synchronizer {
 			require_once CMDR_PLUGIN_PATH . 'campaignmonitor-createsend-php/csrest_subscribers.php';
 		}
 		
-		$auth = array( 'api_key' => get_option( 'cmdr_api_key' ) );
-		$wrap_l = new CS_REST_Lists( get_option( 'cmdr_list_id' ), $auth );
-		$wrap_s = new CS_REST_Subscribers( get_option( 'cmdr_list_id' ), $auth );
+		$auth = array( 'api_key' => $cmdr_api_key );
+		$wrap_l = new CS_REST_Lists( $cmdr_list_id, $auth );
+		$wrap_s = new CS_REST_Subscribers( $cmdr_list_id, $auth );
 		
 		// Update custom fields
 		$missing_fields = $cmdr_user_fields;
