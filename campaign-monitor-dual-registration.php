@@ -1,7 +1,7 @@
 <?php
 /*
 Plugin Name: Campaign Monitor Dual Registration
-Version: 1.0.7
+Version: 1.0.8
 Author: Carlo Roosen, Elena Mukhina
 Author URI: http://www.carloroosen.com/
 */
@@ -12,8 +12,8 @@ define( 'CMDR_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 // Global variables
 global $cmdr_fields_to_hide;
 
-register_deactivation_hook( __FILE__, 'cmdr_default_settings' );
-register_deactivation_hook( __FILE__, 'cmdr_webhook_remove' );
+register_activation_hook( __FILE__, 'cmdr_activation' );
+register_deactivation_hook( __FILE__, 'cmdr_deactivation' );
 
 add_action( 'admin_init', 'cmdr_settings' );
 add_action( 'admin_menu', 'cmdr_settings_menu' );
@@ -28,13 +28,14 @@ add_filter( 'update_user_metadata', 'cmdr_user_meta_update', 1000, 5 );
 
 require_once CMDR_PLUGIN_PATH . 'classes/CMDR_Dual_Synchronizer.php';
 
-function cmdr_default_settings() {
+function cmdr_activation() {
 	if ( ! get_option( 'cmdr_settings' ) ) {
 		remove_action( 'update_option_cmdr_settings', 'cmdr_save_and_sync' );
 		
 		$cmdr_settings = array(
 			'sync_timestamp' => 0,
 			'user_fields' => array(),
+			'user_role' => 0,
 			'api_key' => '',
 			'list_id' => '',
 			'cm_sync' => 0
@@ -43,7 +44,7 @@ function cmdr_default_settings() {
 	}
 }
 
-function cmdr_webhook_remove() {
+function cmdr_deactivation() {
 	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
 	$cmdr_settings[ 'cm_sync' ] = 0;
 	update_option( 'cmdr_settings', $cmdr_settings );
@@ -54,6 +55,7 @@ function cmdr_settings() {
 
 	add_settings_section( 'general', __( 'General', 'cmdr_plugin' ), 'cmdr_settings_general', 'cmdr_plugin' );
 	add_settings_field( 'user_fields', __( 'User fields', 'cmdr_plugin' ), 'cmdr_settings_user_fields', 'cmdr_plugin', 'general' );
+	add_settings_field( 'user_role', __( 'User role', 'cmdr_plugin' ), 'cmdr_settings_user_role', 'cmdr_plugin', 'general' );
 
 	add_settings_section( 'api', __( 'API', 'cmdr_plugin' ), 'cmdr_settings_api', 'cmdr_plugin' );
 	add_settings_field( 'api_key', __( 'API key', 'cmdr_plugin' ), 'cmdr_settings_api_key', 'cmdr_plugin', 'api' );
@@ -93,6 +95,12 @@ function cmdr_settings_user_fields() {
 		}
 		echo '<label><input type="checkbox" name="cmdr_settings[user_fields][]" value="' . esc_attr( $item->meta_key ) . '" ' . checked( in_array( $item->meta_key, $cmdr_user_fields ), true, false ) . ' /> ' . $item->meta_key . '</label><br />';
 	}
+}
+
+function cmdr_settings_user_role() {
+	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
+	echo '<input type="hidden" name="cmdr_settings[user_role]" value="0" />';
+	echo '<input type="checkbox" name="cmdr_settings[user_role]" value="1" ' . checked( $cmdr_settings[ 'user_role'], 1, false ) . ' />';
 }
 
 function cmdr_settings_api() {
@@ -183,23 +191,8 @@ function cmdr_init() {
 }
 
 function cmdr_user_update( $user_id, $old_user_data ) {
-	$user = get_userdata( $user_id );
-	if ( ! $user ) {
-		return;
-	}
-
-	$args = array();
-	if ( $user->user_email != $old_user_data->user_email ) {
-		$args[ 'EmailAddress' ] = $user->user_email;
-	}
-	if ( $user->first_name != $user->first_name || $user->last_name != $user->last_name ) {
-		$args[ 'Name' ] = $user->first_name . ' ' . $user->last_name;
-	}
-
-	if ( count( $args ) ) {
-		// Make user sync
-		CMDR_Dual_Synchronizer::cmdr_user_update( $user_id, $args, $old_user_data->user_email );
-	}
+	// Make user sync
+	CMDR_Dual_Synchronizer::cmdr_user_update( $user_id, $old_user_data->user_email );
 }
 
 function cmdr_save_and_sync( $cmdr_settings_old ) {
@@ -222,7 +215,7 @@ function cmdr_save_and_sync( $cmdr_settings_old ) {
 			$c = true;
 			$result = $wrap_l->get_webhooks();
 			if ( ! $result->was_successful() ) {
-				add_settings_error( 'cmdr_settings', 'cm-error', __( $result->response->Message, 'cmdr_plugin' ) );
+				add_settings_error( 'cmdr_settings', 'cmdr-error', __( $result->response->Message, 'cmdr_plugin' ) );
 			}
 			foreach( $result->response as $hook ) {
 				if ( $hook->Url == admin_url( 'admin-ajax.php?action=cmdr-cm-sync' ) ) {
@@ -238,7 +231,7 @@ function cmdr_save_and_sync( $cmdr_settings_old ) {
 					'PayloadFormat' => CS_REST_WEBHOOK_FORMAT_JSON
 				) );
 				if ( ! $result->was_successful() ) {
-					add_settings_error( 'cmdr_settings', 'cm-error', __( $result->response->Message, 'cmdr_plugin' ) );
+					add_settings_error( 'cmdr_settings', 'cmdr-error', __( $result->response->Message, 'cmdr_plugin' ) );
 				}
 			}
 		} else {
@@ -246,7 +239,7 @@ function cmdr_save_and_sync( $cmdr_settings_old ) {
 			$c = false;
 			$result = $wrap_l->get_webhooks();
 			if ( ! $result->was_successful() ) {
-				add_settings_error( 'cmdr_settings', 'cm-error', __( $result->response->Message, 'cmdr_plugin' ) );
+				add_settings_error( 'cmdr_settings', 'cmdr-error', __( $result->response->Message, 'cmdr_plugin' ) );
 			}
 			foreach( $result->response as $hook ) {
 				if ( $hook->Url == admin_url( 'admin-ajax.php?action=cmdr-cm-sync' ) ) {
@@ -258,7 +251,7 @@ function cmdr_save_and_sync( $cmdr_settings_old ) {
 			if ( $c ) {
 				$result = $wrap_l->delete_webhook( $c );
 				if ( ! $result->was_successful() ) {
-					add_settings_error( 'cmdr_settings', 'cm-error', __( $result->response->Message, 'cmdr_plugin' ) );
+					add_settings_error( 'cmdr_settings', 'cmdr-error', __( $result->response->Message, 'cmdr_plugin' ) );
 				}
 			}
 		}
@@ -268,14 +261,14 @@ function cmdr_save_and_sync( $cmdr_settings_old ) {
 	if ( $cmdr_settings[ 'sync_timestamp' ] > $cmdr_settings_old[ 'sync_timestamp' ] ) {
 		$result = CMDR_Dual_Synchronizer::cmdr_mass_update();
 		if ( ! $result ) {
-			add_settings_error( 'cmdr_settings', 'cm-error', __( CMDR_Dual_Synchronizer::$error->Message, 'cmdr_plugin' ) . ( ! empty( CMDR_Dual_Synchronizer::$error->ResultData ) ? '<br />' . __( 'Error details: ', 'cmdr_plugin' ) . json_encode( CMDR_Dual_Synchronizer::$error->ResultData ) : '' ) );
+			add_settings_error( 'cmdr_settings', 'cmdr-error', __( CMDR_Dual_Synchronizer::$error->Message, 'cmdr_plugin' ) . ( ! empty( CMDR_Dual_Synchronizer::$error->ResultData ) ? '<br />' . __( 'Error details: ', 'cmdr_plugin' ) . json_encode( CMDR_Dual_Synchronizer::$error->ResultData ) : '' ) );
 		}
 	}
 }
 
 function cmdr_user_insert( $user_id ) {
 	// Make new user sync
-	CMDR_Dual_Synchronizer::cmdr_user_update( $user_id, null, null, true );
+	CMDR_Dual_Synchronizer::cmdr_user_update( $user_id, null, true );
 }
 
 function cmdr_cm_sync() {
@@ -345,20 +338,5 @@ function cmdr_cm_sync() {
 }
 
 function cmdr_user_meta_update( $temp, $user_id, $meta_key, $meta_value ) {
-	global $cmdr_fields_to_hide;
-	
-	$cmdr_settings = ( array ) get_option( 'cmdr_settings' );
-	$cmdr_user_fields = ( array ) $cmdr_settings[ 'user_fields' ];
-	
-	// The same value, no needs to update
-	if ( $meta_value == get_user_meta( $user_id, $meta_key, true ) )
-		return;
-	
-	// Field should not be updated
-	if ( ! in_array( $meta_key, $cmdr_user_fields ) || in_array( $meta_key, $cmdr_fields_to_hide ) )
-		return;
-
-	$args = array();
-	$args[ 'CustomFields' ][] = array( 'Key' => $meta_key, 'Value' => $meta_value );
-	CMDR_Dual_Synchronizer::cmdr_user_update( $user_id, $args );
+	CMDR_Dual_Synchronizer::cmdr_user_update( $user_id );
 }
